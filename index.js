@@ -24,7 +24,10 @@ app.get("/proxy", async (req, res) => {
       response.headers.get("content-type") || "application/octet-stream"
     );
 
-    response.body.pipe(res);
+    for await (const chunk of response.body) {
+  res.write(chunk);
+}
+res.end();
   } catch (err) {
     console.error(err);
     res.status(500).send("Proxy error");
