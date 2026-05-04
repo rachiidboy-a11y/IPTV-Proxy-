@@ -1,57 +1,88 @@
 const express = require("express");
-const fetch = require("node-fetch");
+const http = require("http");
+const https = require("https");
 const cors = require("cors");
+const { URL } = require("url");
 
 const app = express();
 app.use(cors());
 
-app.get("/proxy", async (req, res) => {
+app.get("/proxy", (req, res) => {
   try {
-    const url = req.query.url;
-
-    if (!url) {
+    const streamUrl = req.query.url;
+    if (!streamUrl) {
       return res.status(400).send("Missing URL");
     }
 
-    const response = await fetch(url, {
+    const parsedUrl = new URL(streamUrl);
+    const client = parsedUrl.protocol === "https:" ? https : http;
+
+    const options = {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0",
         "Accept": "*/*",
         "Connection": "keep-alive",
-        "Referer": url,
-        "Origin": url
+        "Referer": parsedUrl.origin,
+        "Origin": parsedUrl.origin
       }
-    });
+    };
 
-    if (!response.ok) {
-      return res.status(response.status).send("Stream error: " + response.status);
-    }
+    const request = client.get(streamUrl, options, (response) => {
 
-    // Content-Type übernehmen (wichtig für Player)
-    const contentType = response.headers.get("content-type") || "application/octet-stream";
-    res.setHeader("Content-Type", contentType);
+      // Fehler abfangen
+      if (response.statusCode !== 200) {
+        return res.status(response.statusCode).send("Stream error: " + response.statusCode);
+      }
 
-    // HLS Support (m3u8 anpassen)
-    if (contentType.includes("application/vnd.apple.mpegurl") || url.includes(".m3u8")) {
-      const text = await response.text();
+      const contentType = response.headers["content-type"] || "";
 
-      // Alle relativen Pfade in absolute Proxy-Links umwandeln
-      const base = url.substring(0, url.lastIndexOf("/") + 1);
+      // =========================
+      // 📺 HLS (m3u8)
+      // =========================
+      if (contentType.includes("application/vnd.apple.mpegurl") || streamUrl.includes(".m3u8")) {
+        let data = "";
 
-      const modified = text.replace(/(?!#)(.*\.ts.*)/g, (match) => {
-        const absolute = match.startsWith("http") ? match : base + match;
-        return `/proxy?url=${encodeURIComponent(absolute)}`;
+        response.on("data", chunk => data += chunk);
+
+        response.on("end", () => {
+          const base = streamUrl.substring(0, streamUrl.lastIndexOf("/") + 1);
+
+          const modified = data.replace(/^(?!#)(.+)$/gm, (line) => {
+            if (!line.trim()) return line;
+
+            const absolute = line.startsWith("http") ? line : base + line;
+            return `/proxy?url=${encodeURIComponent(absolute)}`;
+          });
+
+          res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+          res.send(modified);
+        });
+
+        return;
+      }
+
+      // =========================
+      // 📡 MPEG-TS / Live / MP4
+      // =========================
+      res.writeHead(200, {
+        "Content-Type": contentType || "video/mp2t",
+        "Access-Control-Allow-Origin": "*",
+        "Connection": "keep-alive"
       });
 
-      return res.send(modified);
-    }
+      response.pipe(res);
 
-    // Normales Streaming (Live TV / TS / MP4)
-    for await (const chunk of response.body) {
-      res.write(chunk);
-    }
+      // Verbindung sauber schließen
+      req.on("close", () => {
+        request.destroy();
+      });
 
-    res.end();
+    });
+
+    request.on("error", (err) => {
+      console.error(err);
+      res.status(500).send("Proxy error");
+    });
 
   } catch (err) {
     console.error(err);
@@ -62,5 +93,5 @@ app.get("/proxy", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Proxy running on port " + PORT);
+  console.log("Universal IPTV Proxy running on port " + PORT);
 });
