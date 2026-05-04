@@ -13,7 +13,13 @@ app.get("/proxy", async (req, res) => {
       return res.status(400).send("Missing URL");
     }
 
-    const response = await fetch(url);
+    const response = await fetch(url, {
+  headers: {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "*/*",
+    "Connection": "keep-alive"
+  }
+});
 
     if (!response.ok) {
       return res.status(response.status).send("Stream error");
