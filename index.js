@@ -7,12 +7,82 @@ const { URL } = require("url");
 const app = express();
 app.use(cors());
 
-// 👉 ERLAUBTE STREAM DOMAINS (ANPASSEN!)
+// =======================
+// 🔐 USER LOGIN
+// =======================
+const USERS = {
+  "test": "1234"
+};
+
+// =======================
+// ⚙️ CONFIG (DEINE M3U IST DRIN)
+// =======================
+const PLAYLIST_URL = "http://xaagk.teckndc.com/get.php?username=WV3MGNC&password=65E7T5L&output=hls&type=m3u";
+
+// 👉 Domain aus deiner URL!
 const ALLOWED_DOMAINS = [
-  "example.com",
-  "http://xaagk.teckndc.com/get.php?username=WV3MGNC&password=65E7T5L&output=hls&type=m3u"
+  "xaagk.teckndc.com"
 ];
 
+// =======================
+// 🧠 CACHE
+// =======================
+let cache = null;
+let lastFetch = 0;
+
+// =======================
+// 📺 CHANNELS API
+// =======================
+app.get("/channels", async (req, res) => {
+  try {
+    const { user, pass } = req.query;
+
+    if (USERS[user] !== pass) {
+      return res.status(403).send("Unauthorized");
+    }
+
+    const now = Date.now();
+
+    if (cache && now - lastFetch < 5 * 60 * 1000) {
+      return res.json(cache);
+    }
+
+    const response = await fetch(PLAYLIST_URL);
+    const text = await response.text();
+
+    const lines = text.split("\n");
+
+    const channels = [];
+    let current = {};
+
+    lines.forEach(line => {
+      if (line.startsWith("#EXTINF")) {
+        const name = line.split(",")[1];
+
+        const groupMatch = line.match(/group-title="(.*?)"/);
+        const group = groupMatch ? groupMatch[1] : "Other";
+
+        current = { name, group };
+      } else if (line.startsWith("http")) {
+        current.url = `/proxy?url=${encodeURIComponent(line)}`;
+        channels.push(current);
+      }
+    });
+
+    cache = channels;
+    lastFetch = now;
+
+    res.json(channels);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Channel error");
+  }
+});
+
+// =======================
+// 🔁 PROXY
+// =======================
 app.get("/proxy", (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -22,7 +92,6 @@ app.get("/proxy", (req, res) => {
 
     const parsedUrl = new URL(streamUrl);
 
-    // 🔒 Domain Schutz
     if (!ALLOWED_DOMAINS.includes(parsedUrl.hostname)) {
       return res.status(403).send("Forbidden domain");
     }
@@ -46,9 +115,7 @@ app.get("/proxy", (req, res) => {
         return res.status(response.statusCode).send("Stream error: " + response.statusCode);
       }
 
-      // =========================
-      // 📺 HLS Playlist (m3u8)
-      // =========================
+      // 📺 HLS
       if (contentType.includes("application/vnd.apple.mpegurl") || streamUrl.includes(".m3u8")) {
         let data = "";
 
@@ -62,12 +129,10 @@ app.get("/proxy", (req, res) => {
 
             const absolute = line.startsWith("http") ? line : base + line;
 
-            // 👉 NUR m3u8 weiter proxien!
             if (absolute.includes(".m3u8")) {
               return `/proxy?url=${encodeURIComponent(absolute)}`;
             }
 
-            // 👉 TS Dateien direkt vom Anbieter laden
             return absolute;
           });
 
@@ -78,9 +143,7 @@ app.get("/proxy", (req, res) => {
         return;
       }
 
-      // =========================
-      // 📡 Direktstream (MP4 / TS etc.)
-      // =========================
+      // 📡 Direktstream
       res.writeHead(200, {
         "Content-Type": contentType || "video/mp2t",
         "Access-Control-Allow-Origin": "*",
@@ -94,7 +157,6 @@ app.get("/proxy", (req, res) => {
       });
     });
 
-    // ⏱ Timeout (wichtig)
     request.setTimeout(10000, () => {
       request.destroy();
     });
@@ -110,8 +172,11 @@ app.get("/proxy", (req, res) => {
   }
 });
 
+// =======================
+// 🚀 START
+// =======================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Optimized IPTV Proxy running on port " + PORT);
+  console.log("🚀 IPTV Backend läuft auf Port " + PORT);
 });
