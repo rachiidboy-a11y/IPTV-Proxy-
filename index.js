@@ -56,17 +56,21 @@ app.get("/channels", async (req, res) => {
     let current = {};
 
     lines.forEach(line => {
-      if (line.startsWith("#EXTINF")) {
-        const name = line.split(",")[1];
+  const cleanLine = line.trim();
 
-        const groupMatch = line.match(/group-title="(.*?)"/);
-        const group = groupMatch ? groupMatch[1] : "Other";
+  if (cleanLine.startsWith("#EXTINF")) {
+    const name = cleanLine.split(",")[1];
 
-        current = { name, group };
-      } else if (line.startsWith("http")) {
-        current.url = `/proxy?url=${encodeURIComponent(line)}`;
-        channels.push(current);
-      }
+    const groupMatch = cleanLine.match(/group-title="(.*?)"/);
+    const group = groupMatch ? groupMatch[1] : "Other";
+
+    current = { name, group };
+
+  } else if (cleanLine.startsWith("http")) {
+    current.url = `/proxy?url=${encodeURIComponent(cleanLine)}`;
+    channels.push(current);
+  }
+});
     });
 
     cache = channels;
