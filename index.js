@@ -67,7 +67,7 @@ app.get("/channels", async (req, res) => {
     current = { name, group };
 
   } else if (cleanLine.startsWith("http")) {
-    current.url = `/proxy?url=${encodeURIComponent(cleanLine)}`;
+    current.url = `https://iptv-server-p1ml.onrender.com/proxy?url=${encodeURIComponent(cleanLine)}`;
     channels.push(current);
   }
 });
