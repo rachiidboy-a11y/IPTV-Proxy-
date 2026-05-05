@@ -7,6 +7,12 @@ const { URL } = require("url");
 const app = express();
 app.use(cors());
 
+// 👉 ERLAUBTE STREAM DOMAINS (ANPASSEN!)
+const ALLOWED_DOMAINS = [
+  "example.com",
+  "http://xaagk.teckndc.com/get.php?username=WV3MGNC&password=65E7T5L&output=hls&type=m3u"
+];
+
 app.get("/proxy", (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -15,6 +21,12 @@ app.get("/proxy", (req, res) => {
     }
 
     const parsedUrl = new URL(streamUrl);
+
+    // 🔒 Domain Schutz
+    if (!ALLOWED_DOMAINS.includes(parsedUrl.hostname)) {
+      return res.status(403).send("Forbidden domain");
+    }
+
     const client = parsedUrl.protocol === "https:" ? https : http;
 
     const options = {
@@ -28,16 +40,14 @@ app.get("/proxy", (req, res) => {
     };
 
     const request = client.get(streamUrl, options, (response) => {
+      const contentType = response.headers["content-type"] || "";
 
-      // Fehler abfangen
       if (response.statusCode !== 200) {
         return res.status(response.statusCode).send("Stream error: " + response.statusCode);
       }
 
-      const contentType = response.headers["content-type"] || "";
-
       // =========================
-      // 📺 HLS (m3u8)
+      // 📺 HLS Playlist (m3u8)
       // =========================
       if (contentType.includes("application/vnd.apple.mpegurl") || streamUrl.includes(".m3u8")) {
         let data = "";
@@ -51,7 +61,14 @@ app.get("/proxy", (req, res) => {
             if (!line.trim()) return line;
 
             const absolute = line.startsWith("http") ? line : base + line;
-            return `/proxy?url=${encodeURIComponent(absolute)}`;
+
+            // 👉 NUR m3u8 weiter proxien!
+            if (absolute.includes(".m3u8")) {
+              return `/proxy?url=${encodeURIComponent(absolute)}`;
+            }
+
+            // 👉 TS Dateien direkt vom Anbieter laden
+            return absolute;
           });
 
           res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
@@ -62,7 +79,7 @@ app.get("/proxy", (req, res) => {
       }
 
       // =========================
-      // 📡 MPEG-TS / Live / MP4
+      // 📡 Direktstream (MP4 / TS etc.)
       // =========================
       res.writeHead(200, {
         "Content-Type": contentType || "video/mp2t",
@@ -72,11 +89,14 @@ app.get("/proxy", (req, res) => {
 
       response.pipe(res);
 
-      // Verbindung sauber schließen
       req.on("close", () => {
         request.destroy();
       });
+    });
 
+    // ⏱ Timeout (wichtig)
+    request.setTimeout(10000, () => {
+      request.destroy();
     });
 
     request.on("error", (err) => {
@@ -93,5 +113,5 @@ app.get("/proxy", (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Universal IPTV Proxy running on port " + PORT);
+  console.log("Optimized IPTV Proxy running on port " + PORT);
 });
